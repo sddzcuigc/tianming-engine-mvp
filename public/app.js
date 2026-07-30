@@ -9,6 +9,7 @@ const decisionGrid = document.querySelector('#decision-grid');
 const issueButton = document.querySelector('#issue-order');
 const resetButton = document.querySelector('#reset');
 const resultPanel = document.querySelector('#result-panel');
+const provenanceLabel = document.querySelector('#build-provenance');
 
 const stateLabels = {
   treasury: ['国库', '万贯'],
@@ -51,6 +52,20 @@ function signed(value) {
   return value > 0 ? `+${value}` : String(value);
 }
 
+async function renderBuildProvenance() {
+  try {
+    const response = await fetch('./build-info.json', { cache: 'no-store' });
+    if (!response.ok) throw new Error(`HTTP ${response.status}`);
+    const info = await response.json();
+    const shortCommit = info.sourceCommit === 'unknown' ? 'unknown' : info.sourceCommit.slice(0, 12);
+    provenanceLabel.textContent = `构建来源：${info.sourceBranch} @ ${shortCommit}`;
+    provenanceLabel.title = `完整提交：${info.sourceCommit}；构建时间：${info.builtAt}`;
+  } catch (error) {
+    provenanceLabel.textContent = '构建来源：无法校验';
+    provenanceLabel.title = String(error);
+  }
+}
+
 issueButton.addEventListener('click', () => {
   if (!selectedId || resolved) return;
   const outcome = resolveDecision(state, selectedId);
@@ -84,3 +99,4 @@ resetButton.addEventListener('click', () => {
 
 renderState();
 renderDecisions();
+renderBuildProvenance();
