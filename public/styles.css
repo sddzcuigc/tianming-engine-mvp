@@ -49,8 +49,9 @@ p { color: var(--muted); line-height: 1.75; }
 .result-heading strong { display: block; margin-top: 5px; font-family: Georgia, serif; font-size: 1.5rem; }
 .result h3 { margin-top: 24px; color: var(--gold-soft); }
 .result li { margin: 9px 0; color: #c8ccbe; line-height: 1.6; }
-footer { margin-top: 18px; padding: 18px 22px; color: var(--muted); font-size: .86rem; }
+footer { margin-top: 18px; padding: 18px 22px; color: var(--muted); font-size: .86rem; display: flex; justify-content: space-between; gap: 16px; flex-wrap: wrap; }
 footer strong { color: var(--gold-soft); }
+.build-provenance { color: #8f9688; font-family: ui-monospace, SFMono-Regular, Consolas, monospace; font-size: .75rem; }
 
 @media (max-width: 760px) {
   .masthead, .section-heading { display: block; }
