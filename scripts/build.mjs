@@ -4,11 +4,11 @@ import { extname, resolve } from 'node:path';
 const root = resolve(import.meta.dirname, '..');
 const source = resolve(root, 'public');
 const output = resolve(root, 'dist');
-const sourceCommit = process.env.SOURCE_COMMIT || 'unknown';
-const sourceBranch = process.env.SOURCE_BRANCH || 'unknown';
+const sourceCommit = process.env.SOURCE_COMMIT || process.env.VERCEL_GIT_COMMIT_SHA || 'unknown';
+const sourceBranch = process.env.SOURCE_BRANCH || process.env.VERCEL_GIT_COMMIT_REF || 'unknown';
 
 if (sourceCommit !== 'unknown' && !/^[0-9a-f]{7,40}$/i.test(sourceCommit)) {
-  throw new Error('SOURCE_COMMIT must be a 7-40 character hexadecimal Git commit SHA.');
+  throw new Error('Build commit provenance must be a 7-40 character hexadecimal Git commit SHA.');
 }
 
 await rm(output, { recursive: true, force: true });
