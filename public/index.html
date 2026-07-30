@@ -1,0 +1,54 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="description" content="天命工程：受硬规则约束的文明跃迁决策模拟原型。">
+  <title>天命工程｜矿井排水危机</title>
+  <link rel="stylesheet" href="./styles.css">
+</head>
+<body>
+  <main class="shell">
+    <header class="masthead">
+      <div>
+        <span class="eyebrow">天命工程 · MVP 0.1</span>
+        <h1>矿井排水危机</h1>
+        <p>你拥有未来知识，但国家没有承载知识的工业能力。先作出一个受约束、可解释的决定。</p>
+      </div>
+      <span id="turn-label" class="turn">第 1 回合</span>
+    </header>
+
+    <section class="briefing" aria-labelledby="briefing-title">
+      <div>
+        <span class="section-kicker">天下急报</span>
+        <h2 id="briefing-title">北岭煤矿涌水，煤产量下降四成</h2>
+      </div>
+      <p>铁工场缺燃料，军械交付延迟，财政收入开始下降。你可以救急、调查，或直接攻关。</p>
+    </section>
+
+    <section id="state-grid" class="state-grid" aria-label="国家状态"></section>
+
+    <section class="court" aria-labelledby="court-title">
+      <div class="section-heading">
+        <div>
+          <span class="section-kicker">御前会议</span>
+          <h2 id="court-title">三份互相冲突的奏议</h2>
+        </div>
+        <p>没有免费最优解。选择会消耗资源，也会暴露新的瓶颈。</p>
+      </div>
+      <div id="decision-grid" class="decision-grid"></div>
+      <div class="actions">
+        <button id="reset" class="secondary">重置本回合</button>
+        <button id="issue-order" class="primary" disabled>颁布工程令</button>
+      </div>
+    </section>
+
+    <section id="result-panel" class="result" hidden aria-live="polite"></section>
+
+    <footer>
+      <strong>规则边界：</strong>本原型不调用大模型。决策结果由确定性规则引擎结算，同一状态与同一选择得到同一结果。
+    </footer>
+  </main>
+  <script type="module" src="./app.js"></script>
+</body>
+</html>
