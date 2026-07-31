@@ -1,0 +1,40 @@
+name: Preview smoke
+
+on:
+  push:
+    branches:
+      - agent/bootstrap-minimal-slice
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  smoke:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    env:
+      PREVIEW_URL: https://tianming-engine-mvp-git-agent-bootst-37df0b-sddzcuigcs-projects.vercel.app
+      EXPECTED_COMMIT: ${{ github.sha }}
+      VERCEL_AUTOMATION_BYPASS_SECRET: ${{ secrets.VERCEL_AUTOMATION_BYPASS_SECRET }}
+
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - name: Require automation bypass secret
+        run: test -n "$VERCEL_AUTOMATION_BYPASS_SECRET"
+      - name: Run deterministic tests
+        run: npm test
+      - name: Run production build
+        env:
+          SOURCE_COMMIT: ${{ github.sha }}
+          SOURCE_BRANCH: ${{ github.ref_name }}
+        run: npm run build
+      - name: Install Playwright
+        run: |
+          npm install --no-save playwright@1.54.2
+          npx playwright install --with-deps chromium
+      - name: Test protected Preview
+        run: node scripts/smoke-preview.mjs
