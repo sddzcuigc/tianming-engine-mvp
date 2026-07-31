@@ -1,6 +1,34 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { buildCourtMessages, normalizeState, parseCourtPayload } from '../api/court.js';
+import { buildCourtMessages, normalizeState, parseCourtPayload, resolveModelBackend } from '../api/court.js';
+
+test('existing OPENAI_API_KEY goes directly to the OpenAI Responses API', () => {
+  const backend = resolveModelBackend({ OPENAI_API_KEY: 'test-key' });
+  assert.equal(backend.provider, 'openai');
+  assert.equal(backend.transport, 'responses');
+  assert.equal(backend.baseUrl, 'https://api.openai.com/v1');
+  assert.equal(backend.model, 'gpt-5');
+});
+
+test('explicit compatible endpoint wins when LLM_BASE_URL is configured', () => {
+  const backend = resolveModelBackend({
+    LLM_BASE_URL: 'https://example.invalid/v1/',
+    LLM_API_KEY: 'compatible-key',
+    LLM_MODEL: 'custom-model'
+  });
+  assert.equal(backend.provider, 'openai-compatible');
+  assert.equal(backend.transport, 'chat');
+  assert.equal(backend.baseUrl, 'https://example.invalid/v1');
+  assert.equal(backend.model, 'custom-model');
+});
+
+test('Vercel AI Gateway is only the fallback when no direct OpenAI key exists', () => {
+  const backend = resolveModelBackend({ VERCEL_OIDC_TOKEN: 'oidc-token' });
+  assert.equal(backend.provider, 'vercel-ai-gateway');
+  assert.equal(backend.transport, 'chat');
+  assert.equal(backend.baseUrl, 'https://ai-gateway.vercel.sh/v1');
+  assert.equal(backend.model, 'openai/gpt-5.4-nano');
+});
 
 test('court prompt keeps model advice outside deterministic settlement', () => {
   const messages = buildCourtMessages({ question: '先查什么？', state: normalizeState({ treasury: 88, turn: 2 }) });

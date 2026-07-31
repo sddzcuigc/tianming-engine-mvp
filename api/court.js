@@ -1,5 +1,7 @@
-const DEFAULT_BASE_URL = 'https://ai-gateway.vercel.sh/v1';
-const DEFAULT_MODEL = 'openai/gpt-5.4-nano';
+const OPENAI_BASE_URL = 'https://api.openai.com/v1';
+const GATEWAY_BASE_URL = 'https://ai-gateway.vercel.sh/v1';
+const DEFAULT_OPENAI_MODEL = 'gpt-5';
+const DEFAULT_GATEWAY_MODEL = 'openai/gpt-5.4-nano';
 const MINISTERS = Object.freeze([
   { id: 'works', name: '工部尚书', duty: '制造、材料、工匠、工程可行性' },
   { id: 'revenue', name: '户部尚书', duty: '财政、供应、机会成本与持续投入' },
@@ -20,47 +22,22 @@ export default async function handler(request, response) {
     if (!question) return response.status(400).json({ error: 'question_required' });
 
     const state = normalizeState(body.state);
-    const baseUrl = (process.env.LLM_BASE_URL || DEFAULT_BASE_URL).replace(/\/$/, '');
-    const apiKey = process.env.LLM_API_KEY
-      || process.env.OPENAI_API_KEY
-      || process.env.AI_GATEWAY_API_KEY
-      || process.env.VERCEL_OIDC_TOKEN;
-    const model = process.env.LLM_MODEL || DEFAULT_MODEL;
-
-    if (!apiKey) {
+    const backend = resolveModelBackend(process.env);
+    if (!backend) {
       return response.status(503).json({
         error: 'model_not_configured',
-        detail: 'No server-side LLM credential or Vercel OIDC token is available.'
+        detail: 'No OPENAI_API_KEY, compatible LLM credential, AI Gateway key, or Vercel OIDC token is available.'
       });
     }
 
-    const upstream = await fetch(`${baseUrl}/chat/completions`, {
-      method: 'POST',
-      headers: {
-        authorization: `Bearer ${apiKey}`,
-        'content-type': 'application/json'
-      },
-      body: JSON.stringify({
-        model,
-        messages: buildCourtMessages({ question, state }),
-        max_completion_tokens: 900
-      }),
-      signal: AbortSignal.timeout(25_000)
-    });
-
-    const raw = await upstream.text();
-    if (!upstream.ok) {
-      console.error('LLM upstream failed', upstream.status, raw.slice(0, 400));
-      return response.status(502).json({ error: 'model_upstream_failed', status: upstream.status });
-    }
-
-    const completion = JSON.parse(raw);
-    const content = completion.choices?.[0]?.message?.content;
+    const messages = buildCourtMessages({ question, state });
+    const content = await callModel(backend, messages);
     const result = parseCourtPayload(content);
 
     return response.status(200).json({
       ...result,
-      model,
+      model: backend.model,
+      provider: backend.provider,
       ruleBoundary: 'advice_only'
     });
   } catch (error) {
@@ -73,6 +50,104 @@ function parseRequestBody(body) {
   if (!body) return {};
   if (typeof body === 'string') return JSON.parse(body);
   return body;
+}
+
+export function resolveModelBackend(env = {}) {
+  const customBaseUrl = String(env.LLM_BASE_URL || '').trim().replace(/\/$/, '');
+  if (customBaseUrl) {
+    const apiKey = env.LLM_API_KEY || env.OPENAI_API_KEY;
+    if (!apiKey) return null;
+    return {
+      provider: 'openai-compatible',
+      transport: 'chat',
+      baseUrl: customBaseUrl,
+      apiKey,
+      model: env.LLM_MODEL || env.OPENAI_MODEL || DEFAULT_OPENAI_MODEL
+    };
+  }
+
+  if (env.OPENAI_API_KEY) {
+    return {
+      provider: 'openai',
+      transport: 'responses',
+      baseUrl: OPENAI_BASE_URL,
+      apiKey: env.OPENAI_API_KEY,
+      model: env.OPENAI_MODEL || env.LLM_MODEL || DEFAULT_OPENAI_MODEL
+    };
+  }
+
+  const gatewayKey = env.AI_GATEWAY_API_KEY || env.VERCEL_OIDC_TOKEN;
+  if (gatewayKey) {
+    return {
+      provider: 'vercel-ai-gateway',
+      transport: 'chat',
+      baseUrl: GATEWAY_BASE_URL,
+      apiKey: gatewayKey,
+      model: env.LLM_MODEL || DEFAULT_GATEWAY_MODEL
+    };
+  }
+
+  return null;
+}
+
+async function callModel(backend, messages) {
+  const endpoint = backend.transport === 'responses' ? '/responses' : '/chat/completions';
+  const requestBody = backend.transport === 'responses'
+    ? {
+        model: backend.model,
+        input: messages.map((message) => ({
+          role: message.role,
+          content: [{ type: 'input_text', text: message.content }]
+        })),
+        max_output_tokens: 900
+      }
+    : {
+        model: backend.model,
+        messages,
+        max_completion_tokens: 900
+      };
+
+  const upstream = await fetch(`${backend.baseUrl}${endpoint}`, {
+    method: 'POST',
+    headers: {
+      authorization: `Bearer ${backend.apiKey}`,
+      'content-type': 'application/json'
+    },
+    body: JSON.stringify(requestBody),
+    signal: AbortSignal.timeout(25_000)
+  });
+
+  const raw = await upstream.text();
+  if (!upstream.ok) {
+    console.error('LLM upstream failed', backend.provider, upstream.status, raw.slice(0, 400));
+    throw new Error(`model upstream failed with HTTP ${upstream.status}`);
+  }
+
+  const payload = JSON.parse(raw);
+  const content = backend.transport === 'responses'
+    ? extractResponsesText(payload)
+    : extractChatText(payload);
+  if (!content) throw new Error('model returned no text content');
+  return content;
+}
+
+function extractResponsesText(data) {
+  if (typeof data?.output_text === 'string') return data.output_text;
+  for (const item of data?.output || []) {
+    for (const content of item?.content || []) {
+      if (typeof content?.text === 'string') return content.text;
+    }
+  }
+  return null;
+}
+
+function extractChatText(data) {
+  const content = data?.choices?.[0]?.message?.content;
+  if (typeof content === 'string') return content;
+  if (Array.isArray(content)) {
+    return content.map((item) => typeof item?.text === 'string' ? item.text : '').join('').trim() || null;
+  }
+  return null;
 }
 
 export function normalizeState(input = {}) {
