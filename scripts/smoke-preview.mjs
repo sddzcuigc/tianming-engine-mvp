@@ -54,6 +54,28 @@ try {
 
   await assertPageText(page, 'h1', '矿井排水危机');
   await assertPageText(page, '#build-provenance', expectedCommit.slice(0, 12));
+  await assertPageText(page, '#ai-council-title', '先问群臣');
+
+  const courtResponsePromise = page.waitForResponse(
+    (response) => response.url().includes('/api/court') && response.request().method() === 'POST',
+    { timeout: 90_000 }
+  );
+  await page.locator('#ask-court').click();
+  const courtResponse = await courtResponsePromise;
+  const courtBody = await courtResponse.json();
+  assert.equal(courtResponse.status(), 200, `court API should return 200: ${JSON.stringify(courtBody)}`);
+  assert.equal(courtBody.ruleBoundary, 'advice_only', 'model must remain advice-only');
+  assert.equal(Array.isArray(courtBody.ministers), true, 'court API should return ministers');
+  assert.equal(courtBody.ministers.length, 3, 'court API should return exactly three ministers');
+  assert.ok(courtBody.model, 'court API should expose the model used');
+
+  await page.locator('.minister-card').first().waitFor({ state: 'visible', timeout: 30_000 });
+  assert.equal(await page.locator('.minister-card').count(), 3, 'three minister cards should render');
+  await assertPageText(page, '.minister-grid', '工部尚书');
+  await assertPageText(page, '.minister-grid', '户部尚书');
+  await assertPageText(page, '.minister-grid', '御史大夫');
+  await assertPageText(page, '#court-synthesis', '争议焦点');
+  await assertPageText(page, '#court-status', '问策完成');
 
   for (const decisionId of ['investigate', 'prototype', 'ration']) {
     const decision = page.locator(`.decision[data-id="${decisionId}"]`);
@@ -69,7 +91,7 @@ try {
     assert.equal(await page.locator('#issue-order').isDisabled(), true, `${decisionId}: reset should disable issue button`);
   }
 
-  console.log(`Remote preview smoke passed for ${info.sourceBranch} @ ${info.sourceCommit}.`);
+  console.log(`Remote preview + live LLM smoke passed for ${info.sourceBranch} @ ${info.sourceCommit} using ${courtBody.model}.`);
 } catch (error) {
   console.error(error);
   throw error;
