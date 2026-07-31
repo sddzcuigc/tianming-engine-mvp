@@ -3,7 +3,7 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
-  <meta name="description" content="天命工程：受硬规则约束的文明跃迁决策模拟原型。">
+  <meta name="description" content="天命工程：AI 群臣讨论与硬规则结算并存的文明跃迁决策模拟原型。">
   <title>天命工程｜矿井排水危机</title>
   <link rel="stylesheet" href="./styles.css">
 </head>
@@ -11,9 +11,9 @@
   <main class="shell">
     <header class="masthead">
       <div>
-        <span class="eyebrow">天命工程 · MVP 0.1</span>
+        <span class="eyebrow">天命工程 · MVP 0.2</span>
         <h1>矿井排水危机</h1>
-        <p>你拥有未来知识，但国家没有承载知识的工业能力。先作出一个受约束、可解释的决定。</p>
+        <p>先让真正的大模型群臣讨论未知条件，再由硬规则世界模型执行你的工程令。</p>
       </div>
       <span id="turn-label" class="turn">第 1 回合</span>
     </header>
@@ -23,18 +23,36 @@
         <span class="section-kicker">天下急报</span>
         <h2 id="briefing-title">北岭煤矿涌水，煤产量下降四成</h2>
       </div>
-      <p>铁工场缺燃料，军械交付延迟，财政收入开始下降。你可以救急、调查，或直接攻关。</p>
+      <p>铁工场缺燃料，军械交付延迟，财政收入开始下降。不要先猜答案：先问群臣哪些事实仍然未知。</p>
     </section>
 
     <section id="state-grid" class="state-grid" aria-label="国家状态"></section>
 
+    <section class="court ai-council" aria-labelledby="ai-council-title">
+      <div class="section-heading">
+        <div>
+          <span class="section-kicker">御前问策 · 大模型</span>
+          <h2 id="ai-council-title">先问群臣，再决定查什么</h2>
+        </div>
+        <p>大模型只负责建议、追问和暴露分歧；它无权改国库、煤炭、民心或回合数。</p>
+      </div>
+      <label class="question-label" for="court-question">皇帝追问</label>
+      <textarea id="court-question" maxlength="800" rows="3">如果朕想尽快恢复煤产，又不想把国库押在一台可能漏气的蒸汽泵上，现在最应该先查清什么？</textarea>
+      <div class="ask-row">
+        <span id="court-status" class="court-status">尚未问策。</span>
+        <button id="ask-court" class="primary">召集群臣问策</button>
+      </div>
+      <div id="minister-grid" class="minister-grid" aria-live="polite"></div>
+      <p id="court-synthesis" class="court-synthesis" hidden></p>
+    </section>
+
     <section class="court" aria-labelledby="court-title">
       <div class="section-heading">
         <div>
-          <span class="section-kicker">御前会议</span>
-          <h2 id="court-title">三份互相冲突的奏议</h2>
+          <span class="section-kicker">工程令 · 规则引擎</span>
+          <h2 id="court-title">三条当前可执行路线</h2>
         </div>
-        <p>没有免费最优解。选择会消耗资源，也会暴露新的瓶颈。</p>
+        <p>讨论可以开放，结算必须确定。最终数值变化仍由可测试规则执行。</p>
       </div>
       <div id="decision-grid" class="decision-grid"></div>
       <div class="actions">
@@ -46,7 +64,7 @@
     <section id="result-panel" class="result" hidden aria-live="polite"></section>
 
     <footer>
-      <div><strong>规则边界：</strong>本原型不调用大模型。决策结果由确定性规则引擎结算，同一状态与同一选择得到同一结果。</div>
+      <div><strong>AI / 规则边界：</strong>大模型负责生成群臣意见、未知项与建议；世界状态只能由确定性规则引擎修改。</div>
       <span id="build-provenance" class="build-provenance">构建来源：校验中</span>
     </footer>
   </main>
