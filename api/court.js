@@ -26,7 +26,7 @@ export default async function handler(request, response) {
     if (!backend) {
       return response.status(503).json({
         error: 'model_not_configured',
-        detail: 'No OPENAI_API_KEY, compatible LLM credential, AI Gateway key, or Vercel OIDC token is available.'
+        detail: 'No direct model credential is configured and this runtime is not a Vercel deployment with AI Gateway OIDC support.'
       });
     }
 
@@ -87,10 +87,26 @@ export function resolveModelBackend(env = {}) {
     };
   }
 
+  if (isVercelRuntime(env)) {
+    return {
+      provider: 'vercel-ai-gateway-oidc',
+      transport: 'ai-sdk',
+      model: env.LLM_MODEL || DEFAULT_GATEWAY_MODEL
+    };
+  }
+
   return null;
 }
 
+function isVercelRuntime(env) {
+  return env.VERCEL === '1' || Boolean(env.VERCEL_ENV) || Boolean(env.VERCEL_URL);
+}
+
 async function callModel(backend, messages) {
+  if (backend.transport === 'ai-sdk') {
+    return callAiSdkModel(backend, messages);
+  }
+
   const endpoint = backend.transport === 'responses' ? '/responses' : '/chat/completions';
   const requestBody = backend.transport === 'responses'
     ? {
@@ -128,6 +144,27 @@ async function callModel(backend, messages) {
     ? extractResponsesText(payload)
     : extractChatText(payload);
   if (!content) throw new Error('model returned no text content');
+  return content;
+}
+
+async function callAiSdkModel(backend, messages) {
+  const { generateText } = await import('ai');
+  const system = messages.find((message) => message.role === 'system')?.content || '';
+  const prompt = messages
+    .filter((message) => message.role !== 'system')
+    .map((message) => message.content)
+    .join('\n\n');
+
+  const result = await generateText({
+    model: backend.model,
+    system,
+    prompt,
+    maxOutputTokens: 900,
+    abortSignal: AbortSignal.timeout(25_000)
+  });
+
+  const content = typeof result?.text === 'string' ? result.text.trim() : '';
+  if (!content) throw new Error('AI SDK returned no text content');
   return content;
 }
 

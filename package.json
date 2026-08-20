@@ -8,6 +8,9 @@
     "build": "node scripts/build.mjs",
     "start": "node scripts/serve.mjs"
   },
+  "dependencies": {
+    "ai": "7.0.66"
+  },
   "engines": {
     "node": ">=20"
   }

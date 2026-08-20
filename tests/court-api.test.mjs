@@ -22,12 +22,23 @@ test('explicit compatible endpoint wins when LLM_BASE_URL is configured', () => 
   assert.equal(backend.model, 'custom-model');
 });
 
-test('Vercel AI Gateway is only the fallback when no direct OpenAI key exists', () => {
+test('Vercel AI Gateway key or exposed OIDC token stays on the raw gateway path', () => {
   const backend = resolveModelBackend({ VERCEL_OIDC_TOKEN: 'oidc-token' });
   assert.equal(backend.provider, 'vercel-ai-gateway');
   assert.equal(backend.transport, 'chat');
   assert.equal(backend.baseUrl, 'https://ai-gateway.vercel.sh/v1');
   assert.equal(backend.model, 'openai/gpt-5.4-nano');
+});
+
+test('Vercel runtime falls back to AI SDK OIDC when no explicit credential is exposed', () => {
+  const backend = resolveModelBackend({ VERCEL: '1' });
+  assert.equal(backend.provider, 'vercel-ai-gateway-oidc');
+  assert.equal(backend.transport, 'ai-sdk');
+  assert.equal(backend.model, 'openai/gpt-5.4-nano');
+});
+
+test('non-Vercel runtime without credentials remains unconfigured', () => {
+  assert.equal(resolveModelBackend({}), null);
 });
 
 test('court prompt keeps model advice outside deterministic settlement', () => {
