@@ -1,0 +1,17 @@
+{
+  "name": "tianming-engine-mvp",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "test": "node --test",
+    "build": "node scripts/build.mjs",
+    "start": "node scripts/serve.mjs"
+  },
+  "dependencies": {
+    "ai": "7.0.66"
+  },
+  "engines": {
+    "node": ">=20"
+  }
+}

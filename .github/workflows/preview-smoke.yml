@@ -1,0 +1,42 @@
+name: Preview smoke
+
+on:
+  pull_request:
+    branches:
+      - main
+    types:
+      - opened
+      - synchronize
+      - reopened
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  smoke:
+    runs-on: ubuntu-latest
+    timeout-minutes: 8
+    env:
+      PREVIEW_URL: https://tianming-engine-mvp-git-agent-bootst-37df0b-sddzcuigcs-projects.vercel.app
+      EXPECTED_COMMIT: ${{ github.event.pull_request.head.sha || github.sha }}
+      VERCEL_AUTOMATION_BYPASS_SECRET: ${{ secrets.VERCEL_AUTOMATION_BYPASS_SECRET }}
+
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+      - name: Require automation bypass secret
+        run: test -n "$VERCEL_AUTOMATION_BYPASS_SECRET"
+      - name: Run deterministic tests
+        run: npm test
+      - name: Run production build
+        env:
+          SOURCE_COMMIT: ${{ github.event.pull_request.head.sha || github.sha }}
+          SOURCE_BRANCH: ${{ github.head_ref || github.ref_name }}
+        run: npm run build
+      - name: Test protected Preview and live council API
+        run: node scripts/smoke-preview.mjs
