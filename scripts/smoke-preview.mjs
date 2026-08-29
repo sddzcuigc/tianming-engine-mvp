@@ -1,55 +1,104 @@
 import assert from 'node:assert/strict';
-import { execFile } from 'node:child_process';
-import { promisify } from 'node:util';
+import { pathToFileURL } from 'node:url';
 
-const execFileAsync = promisify(execFile);
-const previewUrl = requiredEnv('PREVIEW_URL').replace(/\/$/, '');
-const bypassSecret = requiredEnv('VERCEL_AUTOMATION_BYPASS_SECRET');
-const expectedCommit = requiredEnv('EXPECTED_COMMIT');
+const REDIRECT_STATUSES = new Set([301, 302, 303, 307, 308]);
+const MAX_REDIRECTS = 5;
 
-if (!/^[0-9a-f]{40}$/i.test(expectedCommit)) {
-  throw new Error('EXPECTED_COMMIT must be a full 40-character Git SHA.');
+export function isSsoProtectionRedirect(status, location) {
+  if (!REDIRECT_STATUSES.has(Number(status)) || !location) return false;
+  try {
+    const target = new URL(location, 'https://example.vercel.app');
+    return target.hostname === 'vercel.com' && target.pathname === '/sso-api';
+  } catch {
+    return false;
+  }
 }
 
-function requiredEnv(name) {
-  const value = process.env[name]?.trim();
+export function protectionFailureMessage() {
+  return [
+    'deployment_protection_bypass_rejected:',
+    'Vercel redirected the protected Preview to /sso-api even though an automation bypass secret was supplied.',
+    'The request format matches Vercel Protection Bypass for Automation; rotate/regenerate the project bypass secret,',
+    'update GitHub Actions secret VERCEL_AUTOMATION_BYPASS_SECRET, then rerun this smoke test.'
+  ].join(' ');
+}
+
+function requiredEnv(env, name) {
+  const value = env[name]?.trim();
   if (!value) throw new Error(`${name} is required.`);
   return value;
 }
 
-async function curl(path, { method = 'GET', body } = {}) {
-  const args = [
-    '--fail-with-body',
-    '--silent',
-    '--show-error',
-    '--location',
-    '--connect-timeout', '20',
-    '--max-time', '90',
-    '--header', `x-vercel-protection-bypass: ${bypassSecret}`,
-    '--header', 'x-vercel-set-bypass-cookie: true',
-    '--request', method
-  ];
-
-  if (body !== undefined) {
-    args.push('--header', 'content-type: application/json', '--data-binary', JSON.stringify(body));
-  }
-
-  args.push(`${previewUrl}${path}`);
-  const { stdout } = await execFileAsync('curl', args, { maxBuffer: 2 * 1024 * 1024 });
-  return stdout;
+function normalizePreviewUrl(value) {
+  return value.replace(/\/$/, '');
 }
 
-async function waitForDeployment() {
+async function readText(response) {
+  const text = await response.text();
+  return text.length > 600 ? `${text.slice(0, 600)}…` : text;
+}
+
+async function requestPreview(previewUrl, bypassSecret, path, { method = 'GET', body } = {}) {
+  let url = new URL(`${previewUrl}${path}`);
+  let currentMethod = method;
+  let currentBody = body;
+
+  for (let redirectCount = 0; redirectCount <= MAX_REDIRECTS; redirectCount += 1) {
+    const headers = {
+      'x-vercel-protection-bypass': bypassSecret,
+      'x-vercel-set-bypass-cookie': 'true'
+    };
+    if (currentBody !== undefined) headers['content-type'] = 'application/json';
+
+    const response = await fetch(url, {
+      method: currentMethod,
+      headers,
+      body: currentBody === undefined ? undefined : JSON.stringify(currentBody),
+      redirect: 'manual',
+      signal: AbortSignal.timeout(90_000)
+    });
+
+    const location = response.headers.get('location');
+    if (isSsoProtectionRedirect(response.status, location)) {
+      throw new Error(protectionFailureMessage());
+    }
+
+    if (REDIRECT_STATUSES.has(response.status) && location) {
+      if (redirectCount === MAX_REDIRECTS) {
+        throw new Error(`preview_redirect_limit_exceeded: HTTP ${response.status}`);
+      }
+      url = new URL(location, url);
+      if (response.status === 303 || ((response.status === 301 || response.status === 302) && currentMethod === 'POST')) {
+        currentMethod = 'GET';
+        currentBody = undefined;
+      }
+      continue;
+    }
+
+    if (!response.ok) {
+      const detail = await readText(response);
+      throw new Error(`preview_http_${response.status}: ${detail}`);
+    }
+
+    return response.text();
+  }
+
+  throw new Error('preview_redirect_limit_exceeded');
+}
+
+async function waitForDeployment(previewUrl, bypassSecret, expectedCommit) {
   const deadline = Date.now() + 4 * 60 * 1000;
   let lastError = 'deployment not checked';
 
   while (Date.now() < deadline) {
     try {
-      const info = JSON.parse(await curl('/build-info.json'));
+      const info = JSON.parse(await requestPreview(previewUrl, bypassSecret, '/build-info.json'));
       if (info.sourceCommit === expectedCommit) return info;
       lastError = `Preview is at ${info.sourceCommit}, expected ${expectedCommit}`;
     } catch (error) {
-      lastError = error instanceof Error ? error.message : String(error);
+      const message = error instanceof Error ? error.message : String(error);
+      if (message.startsWith('deployment_protection_bypass_rejected:')) throw error;
+      lastError = message;
     }
     await new Promise((resolve) => setTimeout(resolve, 8_000));
   }
@@ -57,30 +106,44 @@ async function waitForDeployment() {
   throw new Error(`Preview did not reach expected commit: ${lastError}`);
 }
 
-const info = await waitForDeployment();
-const html = await curl('/');
-assert.match(html, /矿井排水危机/, 'preview should contain the crisis title');
-assert.match(html, /御前问策/, 'preview should expose the LLM council entry point');
-assert.match(html, /召集群臣问策/, 'preview should expose the LLM council action');
+export async function runSmoke(env = process.env) {
+  const previewUrl = normalizePreviewUrl(requiredEnv(env, 'PREVIEW_URL'));
+  const bypassSecret = requiredEnv(env, 'VERCEL_AUTOMATION_BYPASS_SECRET');
+  const expectedCommit = requiredEnv(env, 'EXPECTED_COMMIT');
 
-const court = JSON.parse(await curl('/api/court', {
-  method: 'POST',
-  body: {
-    question: '如果朕想尽快恢复煤产，又不想把国库押在一台可能漏气的蒸汽泵上，现在最应该先查清什么？',
-    state: { treasury: 100, coalSupply: 60, publicTrust: 72, knowledge: 0, turn: 1 }
+  if (!/^[0-9a-f]{40}$/i.test(expectedCommit)) {
+    throw new Error('EXPECTED_COMMIT must be a full 40-character Git SHA.');
   }
-}));
 
-assert.equal(court.ruleBoundary, 'advice_only', 'model must remain advice-only');
-assert.equal(Array.isArray(court.ministers), true, 'court API should return ministers');
-assert.equal(court.ministers.length, 3, 'court API should return exactly three ministers');
-assert.deepEqual(court.ministers.map((item) => item.name), ['工部尚书', '户部尚书', '御史大夫']);
-assert.ok(court.ministers.every((item) => item.position && item.reasoning && item.proposal), 'each minister should return substantive advice');
-assert.ok(court.synthesis, 'court API should return a synthesis');
-assert.ok(court.model, 'court API should expose the model used');
+  const info = await waitForDeployment(previewUrl, bypassSecret, expectedCommit);
+  const html = await requestPreview(previewUrl, bypassSecret, '/');
+  assert.match(html, /矿井排水危机/, 'preview should contain the crisis title');
+  assert.match(html, /御前问策/, 'preview should expose the LLM council entry point');
+  assert.match(html, /召集群臣问策/, 'preview should expose the LLM council action');
 
-for (const minister of court.ministers) {
-  assert.equal(Array.isArray(minister.unknowns), true, `${minister.name} should expose unknowns as an array`);
+  const court = JSON.parse(await requestPreview(previewUrl, bypassSecret, '/api/court', {
+    method: 'POST',
+    body: {
+      question: '如果朕想尽快恢复煤产，又不想把国库押在一台可能漏气的蒸汽泵上，现在最应该先查清什么？',
+      state: { treasury: 100, coalSupply: 60, publicTrust: 72, knowledge: 0, turn: 1 }
+    }
+  }));
+
+  assert.equal(court.ruleBoundary, 'advice_only', 'model must remain advice-only');
+  assert.equal(Array.isArray(court.ministers), true, 'court API should return ministers');
+  assert.equal(court.ministers.length, 3, 'court API should return exactly three ministers');
+  assert.deepEqual(court.ministers.map((item) => item.name), ['工部尚书', '户部尚书', '御史大夫']);
+  assert.ok(court.ministers.every((item) => item.position && item.reasoning && item.proposal), 'each minister should return substantive advice');
+  assert.ok(court.synthesis, 'court API should return a synthesis');
+  assert.ok(court.model, 'court API should expose the model used');
+
+  for (const minister of court.ministers) {
+    assert.equal(Array.isArray(minister.unknowns), true, `${minister.name} should expose unknowns as an array`);
+  }
+
+  console.log(`Remote protected Preview + live LLM smoke passed for ${info.sourceBranch} @ ${info.sourceCommit} using ${court.model}.`);
 }
 
-console.log(`Remote protected Preview + live LLM smoke passed for ${info.sourceBranch} @ ${info.sourceCommit} using ${court.model}.`);
+if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) {
+  await runSmoke();
+}
