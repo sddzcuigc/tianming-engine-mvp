@@ -4,6 +4,16 @@ import { pathToFileURL } from 'node:url';
 const REDIRECT_STATUSES = new Set([301, 302, 303, 307, 308]);
 const MAX_REDIRECTS = 5;
 
+export function safeRedirectTarget(location, base = 'https://example.vercel.app') {
+  if (!location) return '(missing-location)';
+  try {
+    const target = new URL(location, base);
+    return `${target.hostname}${target.pathname}`;
+  } catch {
+    return '(invalid-location)';
+  }
+}
+
 export function isSsoProtectionRedirect(status, location) {
   if (!REDIRECT_STATUSES.has(Number(status)) || !location) return false;
   try {
@@ -42,6 +52,7 @@ async function requestPreview(previewUrl, bypassSecret, path, { method = 'GET', 
   let url = new URL(`${previewUrl}${path}`);
   let currentMethod = method;
   let currentBody = body;
+  const redirectChain = [];
 
   for (let redirectCount = 0; redirectCount <= MAX_REDIRECTS; redirectCount += 1) {
     const headers = {
@@ -55,7 +66,7 @@ async function requestPreview(previewUrl, bypassSecret, path, { method = 'GET', 
       headers,
       body: currentBody === undefined ? undefined : JSON.stringify(currentBody),
       redirect: 'manual',
-      signal: AbortSignal.timeout(90_000)
+      signal: AbortSignal.timeout(20_000)
     });
 
     const location = response.headers.get('location');
@@ -64,8 +75,10 @@ async function requestPreview(previewUrl, bypassSecret, path, { method = 'GET', 
     }
 
     if (REDIRECT_STATUSES.has(response.status) && location) {
+      const safeTarget = safeRedirectTarget(location, url);
+      redirectChain.push(`${response.status}->${safeTarget}`);
       if (redirectCount === MAX_REDIRECTS) {
-        throw new Error(`preview_redirect_limit_exceeded: HTTP ${response.status}`);
+        throw new Error(`preview_redirect_loop: ${redirectChain.join(' | ')}`);
       }
       url = new URL(location, url);
       if (response.status === 303 || ((response.status === 301 || response.status === 302) && currentMethod === 'POST')) {
@@ -83,11 +96,15 @@ async function requestPreview(previewUrl, bypassSecret, path, { method = 'GET', 
     return response.text();
   }
 
-  throw new Error('preview_redirect_limit_exceeded');
+  throw new Error('preview_redirect_loop: redirect loop exhausted');
+}
+
+function isNonRetryablePreviewFailure(message) {
+  return message.startsWith('deployment_protection_bypass_rejected:') || message.startsWith('preview_redirect_loop:');
 }
 
 async function waitForDeployment(previewUrl, bypassSecret, expectedCommit) {
-  const deadline = Date.now() + 4 * 60 * 1000;
+  const deadline = Date.now() + 90_000;
   let lastError = 'deployment not checked';
 
   while (Date.now() < deadline) {
@@ -97,10 +114,10 @@ async function waitForDeployment(previewUrl, bypassSecret, expectedCommit) {
       lastError = `Preview is at ${info.sourceCommit}, expected ${expectedCommit}`;
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error);
-      if (message.startsWith('deployment_protection_bypass_rejected:')) throw error;
+      if (isNonRetryablePreviewFailure(message)) throw error;
       lastError = message;
     }
-    await new Promise((resolve) => setTimeout(resolve, 8_000));
+    await new Promise((resolve) => setTimeout(resolve, 5_000));
   }
 
   throw new Error(`Preview did not reach expected commit: ${lastError}`);
