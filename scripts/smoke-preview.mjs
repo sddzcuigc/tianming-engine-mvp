@@ -56,8 +56,7 @@ async function requestPreview(previewUrl, bypassSecret, path, { method = 'GET', 
 
   for (let redirectCount = 0; redirectCount <= MAX_REDIRECTS; redirectCount += 1) {
     const headers = {
-      'x-vercel-protection-bypass': bypassSecret,
-      'x-vercel-set-bypass-cookie': 'true'
+      'x-vercel-protection-bypass': bypassSecret
     };
     if (currentBody !== undefined) headers['content-type'] = 'application/json';
 
